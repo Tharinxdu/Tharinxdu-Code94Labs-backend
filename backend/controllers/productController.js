@@ -1,7 +1,7 @@
 const Product = require('../models/productModel');
 const multer = require('multer');
 const path = require('path');
-const deleteImages = require('../utils/deleteImgs'); // Corrected import
+const deleteImages = require('../helpers/deleteImgs');
 
 // Multer configuration for image uploads
 const storage = multer.diskStorage({
@@ -9,7 +9,7 @@ const storage = multer.diskStorage({
         cb(null, path.join(__dirname, '../uploads/images'));
     },
     filename: function (req, file, cb) {
-        cb(null, `${Date.now()}-${file.originalname}`);
+        cb(null, `${file.originalname}`);
     }
 });
 
@@ -38,19 +38,21 @@ exports.addProduct = (req, res) => {
         }
 
         try {
-            const { sku, quantity, name, description, mainImage } = req.body;
-            const images = req.files.map(file => file.path);
+            const { sku, quantity, name, description, price, mainImage } = req.body;
+            const images = req.files.map(file => `/uploads/images/${file.filename}`);
 
             const product = new Product({
                 sku,
                 quantity,
                 name,
                 description,
+                price,
                 images,
-                mainImage
+                mainImage: `/uploads/images/${mainImage}`
             });
 
             const createdProduct = await product.save();
+
             res.status(201).json({ success: true, product: createdProduct });
         } catch (error) {
             res.status(500).json({ success: false, message: 'Server error', error: error.message });
@@ -97,37 +99,45 @@ exports.updateProduct = (req, res) => {
         }
 
         try {
-            const { sku, quantity, name, description, mainImage } = req.body;
-            const images = req.files.map(file => file.path);
+            const { sku, quantity, name, description, price, mainImage } = req.body;
+            let images = req.files.map(file => `/uploads/images/${file.filename}`);
 
             const product = await Product.findById(req.params.id);
 
             if (!product) {
-                // If product not found, delete uploaded images to avoid orphan files
                 if (images.length > 0) deleteImages(images);
                 return res.status(404).json({ success: false, message: 'Product not found' });
             }
 
-            // Delete old images if new ones are provided
             if (images.length > 0) {
                 deleteImages(product.images);
                 product.images = images;
+            } else {
+                // Keep existing images if no new images are uploaded
+                images = product.images;
             }
 
-            // Update product fields
             product.sku = sku || product.sku;
             product.quantity = quantity || product.quantity;
             product.name = name || product.name;
             product.description = description || product.description;
-            if (mainImage) product.mainImage = mainImage;
+            product.price = price || product.price;
+
+            if (mainImage) {
+                product.mainImage = mainImage.startsWith('/uploads/images/')
+                    ? mainImage
+                    : `/uploads/images/${mainImage}`;
+            }
 
             const updatedProduct = await product.save();
+
             res.json({ success: true, product: updatedProduct });
         } catch (error) {
             res.status(500).json({ success: false, message: 'Server error', error: error.message });
         }
     });
 };
+
 
 // @desc    Delete a product
 // @route   DELETE /api/products/:id
@@ -140,12 +150,43 @@ exports.deleteProduct = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Product not found' });
         }
 
-        // Delete associated images from the server
         deleteImages(product.images);
 
         await product.deleteOne();
+
         res.json({ success: true, message: 'Product removed' });
     } catch (error) {
         res.status(500).json({ success: false, message: 'Server error', error: error.message });
+    }
+};
+
+// @desc    Search products
+// @route   GET /api/products/search
+// @access  Public
+exports.searchProducts = async (req, res) => {
+    const { query } = req.query;
+
+    // Validate the query parameter
+    if (!query || !query.trim()) {
+        return res.status(400).json({ success: false, message: 'Query cannot be empty' });
+    }
+
+    try {
+        // Search for products using MongoDB text search
+        const products = await Product.find(
+            { $text: { $search: query } }, 
+            { score: { $meta: "textScore" } }
+        ).sort({ score: { $meta: "textScore" } });
+
+        // Check if any products were found
+        if (products.length === 0) {
+            return res.status(404).json({ success: true, message: 'No products found matching your search', products: [] });
+        }
+
+        // Return the found products
+        res.json({ success: true, products });
+    } catch (error) {
+        // Handle potential server errors
+        res.status(500).json({ success: false, message: 'Search error', error: error.message });
     }
 };

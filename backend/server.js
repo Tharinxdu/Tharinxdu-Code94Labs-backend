@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const dotenv = require('dotenv');
 const cors = require('cors');
 const path = require('path');
+const corsOptions = require('./config/corsOptions');  // Import the custom CORS options
 
 dotenv.config();
 
@@ -10,10 +11,10 @@ const app = express();
 
 // Middleware
 app.use(express.json());
-app.use(cors());
+app.use(cors(corsOptions));  // Use the custom CORS options
 
-// Serve static files for uploaded images
-app.use('/uploads/images', express.static(path.join(__dirname, '../uploads/images')));
+// Serve static files from the uploads folder
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Connect to MongoDB
 mongoose.connect(process.env.MONGODB_URI)
@@ -22,7 +23,7 @@ mongoose.connect(process.env.MONGODB_URI)
 
 // Routes
 app.use('/api/products', require('./routes/productRoutes'));
-// app.use('/api/auth', require('./routes/authRoutes')); // Uncomment if you have authRoutes
+app.use('/api/auth', require('./routes/authRoutes'));
 
 // Start the server
 const PORT = process.env.PORT || 5000;
